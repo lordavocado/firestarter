@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import FirecrawlApp from '@mendable/firecrawl-js';
-import { serverConfig as config } from '@/firestarter.config';
+import { serverConfig as config } from '@/lejechat.config';
 
 interface ScrapeRequestBody {
   url?: string;
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     if (!rateLimit.success) {
       return NextResponse.json({ 
         success: false,
-        error: 'Rate limit exceeded. Please try again later.' 
+        error: 'Hastighedsgrænsen er nået. Prøv igen senere.' 
       }, { 
         status: 429,
         headers: {
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     if (!headerApiKey) {
       return NextResponse.json({ 
         success: false, 
-        error: 'API configuration error. Please try again later or contact support.' 
+        error: 'API-konfigurationen mangler. Prøv igen senere eller kontakt support.' 
       }, { status: 500 });
     }
     
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
     } else if (urls && Array.isArray(urls)) {
       result = await app.batchScrapeUrls(urls, params) as ScrapeResult;
     } else {
-      return NextResponse.json({ success: false, error: 'Invalid request format. Please check your input and try again.' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Ugyldigt requestformat. Kontroller din indtastning og prøv igen.' }, { status: 400 });
     }
     
     return NextResponse.json(result);
@@ -76,6 +76,6 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     const err = error as ApiError;
     const errorStatus = typeof err.status === 'number' ? err.status : 500;
-    return NextResponse.json({ success: false, error: 'An error occurred while processing your request. Please try again later.' }, { status: errorStatus });
+    return NextResponse.json({ success: false, error: 'Der opstod en fejl under behandlingen af din forespørgsel. Prøv igen senere.' }, { status: errorStatus });
   }
 } 

@@ -10,36 +10,36 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Firecrawl Tools - AI-Powered Web Scraping & Data Enrichment",
-  description: "Transform websites into structured data with Firecrawl's suite of AI tools. Create chatbots, enrich CSVs, search intelligently, and generate images from URLs.",
-  metadataBase: new URL(process.env.NEXT_PUBLIC_URL || "https://firecrawl.dev"),
+  title: "Lejechat – Chatbots til danske udlejningsboliger",
+  description: "Byg en dansk chatbot, der svarer på spørgsmål om ledige lejemål, depositum og indflytning på få minutter.",
+  metadataBase: new URL(process.env.NEXT_PUBLIC_URL || "https://lejechat.dk"),
   openGraph: {
-    title: "Firecrawl Tools - AI-Powered Web Scraping & Data Enrichment",
-    description: "Transform websites into structured data with Firecrawl's suite of AI tools. Create chatbots, enrich CSVs, search intelligently, and generate images from URLs.",
+    title: "Lejechat – Chatbots til danske udlejningsboliger",
+    description: "Byg en dansk chatbot, der svarer på spørgsmål om ledige lejemål, depositum og indflytning på få minutter.",
     url: "/",
-    siteName: "Firecrawl Tools",
+    siteName: "Lejechat",
     images: [
       {
-        url: "/firecrawl-logo-with-fire.png",
+        url: "/lejechat-logo.svg",
         width: 1200,
         height: 630,
-        alt: "Firecrawl - AI-Powered Web Scraping",
+        alt: "Lejechat – chatbots til udlejning",
       },
     ],
-    locale: "en_US",
+    locale: "da_DK",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Firecrawl Tools - AI-Powered Web Scraping",
-    description: "Transform websites into structured data with AI",
-    images: ["/firecrawl-logo-with-fire.png"],
-    creator: "@firecrawl_dev",
+    title: "Lejechat – Chatbots til udlejning",
+    description: "Svar på spørgsmål om dine lejemål direkte i chatten.",
+    images: ["/lejechat-logo.svg"],
+    creator: "@lejechat",
   },
   icons: {
-    icon: "/favicon.ico",
-    shortcut: "/favicon.ico",
-    apple: "/favicon.ico",
+    icon: "/lejechat-favicon.svg",
+    shortcut: "/lejechat-favicon.svg",
+    apple: "/lejechat-favicon.svg",
   },
   robots: {
     index: true,
@@ -60,7 +60,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="da" suppressHydrationWarning>
       <body
         suppressHydrationWarning={true}
         className={cn(

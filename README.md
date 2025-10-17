@@ -1,182 +1,142 @@
-# Firestarter - Instant AI Chatbots for Any Website
+# Lejechat – Chatbots til danske udlejningsboliger
 
 <div align="center">
-  <img src="https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExNGVhOTdxaDhxZGJ6bnAwaDB3bWp3bXpnYzN1NDBrazJ1MGpvOG51aCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ZAOM1psWWVQYeAaS38/giphy.gif" alt="Firestarter Demo" width="100%" />
+  <img src="https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExNGVhOTdxaDhxZGJ6bnAwaDB3bWp3bXpnYzN1NDBrazJ1MGpvOG51aCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ZAOM1psWWVQYeAaS38/giphy.gif" alt="Lejechat demo" width="100%" />
 </div>
 
-Instantly create a knowledgeable AI chatbot for any website. Firestarter crawls your site, indexes the content, and provides a ready-to-use RAG-powered chat interface and an OpenAI-compatible API endpoint.
+Lejechat gør det nemt for danske ejendomsadministratorer at bygge en chatbot, der kan svare på spørgsmål om ledige lejemål, indflytningsdatoer, depositum og andre leasingdetaljer. Platformen importerer sider fra jeres boligsite, indeksere indholdet og udstiller en dansk chatoplevelse samt et OpenAI-kompatibelt API.
 
-## Technologies
+Ved at kombinere automatisk crawling, kontekstuel søgning og streaming-svar kan du give potentielle lejere øjeblikkelige, korrekte svar – uden at holde dine boligdata opdateret manuelt.
 
-- **Firecrawl**: Web scraping and content aggregation
-- **Upstash Search**: High-performance vector database for semantic search
-- **Vercel AI SDK**: For streaming AI responses
-- **Next.js 15**: Modern React framework with App Router
-- **Groq, OpenAI, Anthropic**: Flexible LLM provider support
+## Teknologi-stack
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmendableai%2Ffirestarter&env=FIRECRAWL_API_KEY,UPSTASH_SEARCH_REST_URL,UPSTASH_SEARCH_REST_TOKEN,OPENAI_API_KEY&envDescription=API%20keys%20for%20Firecrawl,%20Upstash,%20and%20OpenAI%20are%20required.&envLink=https%3A%2F%2Fgithub.com%2Fmendableai%2Ffirestarter%23required-api-keys)
+- **Firecrawl** til at hente boligannoncer og metadata
+- **Upstash Search** til semantisk søgning på boligindhold
+- **Vercel AI SDK** til streaming-svar i chatten
+- **Next.js 15** med App Router til UI og API-endpoints
+- **Groq, OpenAI eller Anthropic** som LLM-backend (valgfrit per miljø)
 
-## Setup
+## Opsætning
 
-### Required API Keys
+### Påkrævede nøgler
 
-You need a key from Firecrawl, Upstash, and at least one LLM provider.
+| Tjeneste           | Formål                                   | Hvor hentes den |
+| ------------------ | ----------------------------------------- | ---------------- |
+| Firecrawl          | Import af boligannoncer                   | [firecrawl.dev/app/api-keys](https://www.firecrawl.dev/app/api-keys) |
+| Upstash Search     | Semantisk søgning og vektorindeks         | [console.upstash.com](https://console.upstash.com) |
+| LLM-udbyder        | Groq, OpenAI eller Anthropic til svar     | Udbyderens konsol |
 
-| Service          | Purpose                               | Get Key                                      |
-| ---------------- | ------------------------------------- | -------------------------------------------- |
-| Firecrawl        | Web scraping and content aggregation  | [firecrawl.dev/app/api-keys](https://www.firecrawl.dev/app/api-keys) |
-| Upstash          | Vector DB for semantic search         | [console.upstash.com](https://console.upstash.com) |
-| OpenAI           | AI model provider (default)          | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+### Hurtig start
 
-### Quick Start
-
-1. Clone this repository
-2. Create a `.env.local` file with your API keys:
+1. Klon repoet
+2. Opret `.env.local` med dine nøgler:
+   ```env
+   FIRECRAWL_API_KEY=din_firecrawl_nøgle
+   
+   # Upstash Search
+   UPSTASH_SEARCH_REST_URL=...
+   UPSTASH_SEARCH_REST_TOKEN=...
+   
+   # Vælg mindst én LLM-udbyder
+   OPENAI_API_KEY=...
+   # ANTHROPIC_API_KEY=...
+   # GROQ_API_KEY=...
    ```
-   FIRECRAWL_API_KEY=your_firecrawl_key
-   
-   # Upstash Vector DB Credentials
-   UPSTASH_SEARCH_REST_URL=your_upstash_search_url
-   UPSTASH_SEARCH_REST_TOKEN=your_upstash_search_token
-   
-   # OpenAI API Key (default provider)
-   OPENAI_API_KEY=your_openai_key
-   
-   # Optional: Disable chatbot creation (for read-only deployments)
-   # DISABLE_CHATBOT_CREATION=true
-   ```
-3. Install dependencies: `npm install` or `yarn install`
-4. Run the development server: `npm run dev` or `yarn dev`
-5. Open [http://localhost:3000](http://localhost:3000)
+3. Installer pakker: `pnpm install`
+4. Start dev-server: `pnpm dev`
+5. Åbn [http://localhost:3000](http://localhost:3000)
 
-## Example Interaction
+## Eksempel
 
-**Input:**
-A website URL, like `https://firecrawl.dev`
+**Input:** en boligside, fx `https://www.lejebolig.dk`
 
-**Output:**
-A fully functional chat interface and an API endpoint to query your website's content.
+**Output:** en Lejechat-chatbot, der forstår dine annoncer og kan svare på spørgsmål som "Hvilke 3-værelses lejligheder er ledige i Aarhus?".
 
-## How It Works
+## Arkitektur – fra import til svar
 
-### Architecture Overview: From URL to AI Chatbot
+### 1. Import af boligwebsite
+1. **URL-indsendelse:** frontend kalder `/api/lejechat/create`
+2. **Firecrawl import:** sider hentes som Markdown + HTML
+3. **Indeksering:** dokumenter gemmes i Upstash Search med navnerum<br>`<domæne>-<timestamp>` (fx `lejebolig-dk-1718394041`)
+4. **Metadata:** titler, beskrivelser og favicons gemmes i Redis/localStorage via `lib/storage`
 
-Let's trace the journey from submitting `https://docs.firecrawl.dev` to asking it "How do I use the API?".
+### 2. Svarpipeline (RAG)
+1. **Brugerspørgsmål:** `/api/lejechat/query` slår op i det relevante navnerum
+2. **Semantisk søgning:** top-dokumenter hentes og formateres som dansk kontekst
+3. **LLM-prompt:** systemprompten i `lejechat.config.ts` rammer en dansk tone og begrænser svar til importerede data
+4. **Streaming:** Vercel AI SDK streamer svaret og referencer til dashboardet
 
-### Phase 1: Indexing a Website
+### 3. Deling og embed
+- Hver chatbot får automatisk et slug og et link i formatet `/chat/<slug>`
+- Kopiér embed-snippet fra dashboardet eller brug:
 
-1.  **URL Submission**: You enter a URL. The frontend calls the `/api/firestarter/create` endpoint.
-2.  **Smart Crawling**: The backend uses the **Firecrawl API** to crawl the website, fetching the content of each page as clean Markdown.
-3.  **Indexing**: The content of each page is sent to **Upstash Search**, which automatically chunks and converts it into vector embeddings.
-4.  **Namespace Creation**: The entire crawl is stored under a unique, shareable `namespace` (e.g., `firecrawl-dev-1718394041`). This isolates the data for each chatbot.
-5.  **Metadata Storage**: Information about the chatbot (URL, namespace, title, favicon) is saved in Redis (if configured) or the browser's local storage for persistence.
+  ```html
+  <script src="https://din-lejechat-installation/embed/lejechat?slug=<slug>" defer></script>
+  ```
 
-### Phase 2: Answering Questions (RAG Pipeline)
+- Tilpas farve og launcher-tekst via URL-parametre, fx `&accent=%23f97316&label=Start%20chat`
+- Scriptet tilføjer en flydende knap i nederste højre hjørne, der åbner Lejechat i et indlejret panel
 
-1.  **User Query**: You ask a question in the chat interface. The frontend calls the `/api/firestarter/query` endpoint with your question and the chatbot's `namespace`.
-2.  **Semantic Search**: The backend performs a semantic search on the **Upstash Search** index. It looks for the most relevant document chunks based on the meaning of your query within the specific `namespace`.
-3.  **Context-Aware Prompting**: The most relevant chunks are compiled into a context block, which is then passed to the LLM (e.g., Groq) along with your original question. The system prompt instructs the LLM to answer *only* using the provided information.
-4.  **Streaming Response**: The LLM generates the answer, and the response is streamed back to the UI in real-time using the **Vercel AI SDK**, creating a smooth, "typing" effect.
+### 3. Deling og offentlig visning
+- Hver chatbot får automatisk et slug og et link i formatet `/chat/<slug>`
+- Linket kan deles fra dashboardet eller indeksoversigten og åbner en offentlig chatvisning uden administrationsfunktioner
+- Den offentlige visning bruger den samme RAG-pipeline og viser kildehenvisninger, så lejere kan verificere svarene
 
-### OpenAI-Compatible API: The Ultimate Power-Up
+### API-adgang i OpenAI-format
 
-Firestarter doesn't just give you a UI; it provides a powerful, OpenAI-compatible API endpoint for each chatbot you create.
+```ts
+import OpenAI from 'openai'
 
--   **Endpoint**: `api/v1/chat/completions`
--   **How it works**: When you create a chatbot for `example.com`, Firestarter generates a unique model name like `firecrawl-example-com-12345`.
--   **Integration**: You can use this model name with any official or community-built OpenAI library. Just point the client's `baseURL` to your Firestarter instance.
+const lejechat = new OpenAI({
+  apiKey: 'any-string',
+  baseURL: 'https://din-lejechat-installation.vercel.app/api/v1/chat/completions'
+})
 
-```javascript
-// Example: Using the OpenAI JS SDK with your new chatbot
-import OpenAI from 'openai';
+const svar = await lejechat.chat.completions.create({
+  model: 'lejechat-lejebolig-dk-12345',
+  messages: [{ role: 'user', content: 'Er der altan og husdyr tilladt?' }]
+})
 
-const firestarter = new OpenAI({
-  apiKey: 'any_string_works_here', // Auth is handled by your deployment
-  baseURL: 'https://your-firestarter-deployment.vercel.app/api/v1/chat/completions'
-});
-
-const completion = await firestarter.chat.completions.create({
-  model: 'firecrawl-firecrawl-dev-12345', // The model name for your site
-  messages: [{ role: 'user', content: 'What is Firecrawl?' }],
-});
-
-console.log(completion.choices[0].message.content);
+console.log(svar.choices[0].message.content)
 ```
-This turns any website into a programmatic, queryable data source, perfect for building custom applications.
 
-## Key Features
+## Nøglefunktioner
 
--   **Instant Chatbot Creation**: Go from a URL to a fully-functional AI chatbot in under a minute.
--   **High-Performance RAG**: Leverages Firecrawl for clean data extraction and Upstash for fast, serverless semantic search.
--   **OpenAI-Compatible API**: Integrate your website's knowledge into any application using the familiar OpenAI SDKs.
--   **Streaming Responses**: Real-time answer generation powered by the Vercel AI SDK for a seamless user experience.
--   **Flexible LLM Support**: Works out-of-the-box with Groq, OpenAI, and Anthropic.
--   **Persistent Indexes**: Your chatbots are saved and can be accessed anytime from the index page.
--   **Customizable Crawl Depth**: Easily configure how many pages to crawl for deeper or quicker indexing.
--   **Fully Open Source**: Understand, modify, and extend every part of the system.
+- **Dansk brugeroplevelse:** alle UI-tekster og prompts er oversat til dansk boliglingo
+- **Hurtig import:** fra URL til chat på under et minut
+- **Kilder og streaming:** svar kommer med klikbare reference-links til annoncerne
+- **OpenAI-kompatibelt API:** brug samme endpoint i interne systemer og workflows
+- **Delbart offentligt link:** del chatbotten via `/chat/<slug>` og lad lejere teste den med det samme
+- **Embed-widget:** indlæs Lejechat på dine egne sider med et `<script>`
+- **Konfigurerbar kontekst:** justér temperatur, tokens og rate limits i `lejechat.config.ts`
 
-## Configuration
+## Konfiguration
 
-You can customize the application's behavior by modifying [`firestarter.config.ts`](firestarter.config.ts). When you run this repository locally, the crawling limits are increased.
+`lejechat.config.ts` styrer navngivning, prompt og grænser.
 
-```typescript
-// firestarter.config.ts
-
+```ts
 const config = {
-  // ...
+  app: {
+    name: 'Lejechat',
+    logoPath: '/lejechat-logo.svg',
+  },
+  ai: {
+    systemPrompt: 'Du er en hjælpsom udlejningsassistent...'
+  },
   crawling: {
     defaultLimit: 10,
-    maxLimit: 100, // Change this for your self-hosted version
-    minLimit: 10,
     limitOptions: [10, 25, 50, 100],
-    // ...
   },
-  features: {
-    // Chatbot creation can be disabled for read-only deployments
-    enableCreation: process.env.DISABLE_CHATBOT_CREATION !== 'true',
+  storage: {
+    localStorageKey: 'lejechat_indexes',
   },
-  // ...
 }
 ```
 
-### Changing the LLM Provider
+Ændr prioriteten mellem Groq/OpenAI/Anthropic ved at slette eller tilføje API-nøgler i `.env.local`. Funktionen `getAIModel()` vælger første gyldige udbyder.
 
-Firestarter supports multiple LLM providers and uses them based on a priority system. The default priority is **OpenAI (GPT-4o) → Anthropic (Claude 3.5 Sonnet) → Groq**. The system will use the first provider in this list for which it finds a valid API key in your environment.
+## Bidrag og licens
 
-To change the provider, simply adjust your `.env.local` file. For example, to use Anthropic instead of OpenAI, comment out your `OPENAI_API_KEY` and ensure your `ANTHROPIC_API_KEY` is set.
+Vi tager imod PR’er, der forbedrer boligprompten, tilføjer automatiske tests eller udvider søgeoplevelsen. Åbn gerne en issue med idéer til danske ejendomsflows.
 
-**Example `.env.local` to use Anthropic:**
-```
-# To use Anthropic instead of OpenAI, comment out the OpenAI key:
-# OPENAI_API_KEY=sk-...
-
-ANTHROPIC_API_KEY=sk-ant-...
-
-# GROQ_API_KEY=gsk_...
-```
-
-This provider selection logic is controlled in [`firestarter.config.ts`](firestarter.config.ts). You can modify the `getAIModel` function if you want to implement a different selection strategy.
-
-## Our Open Source Philosophy
-
-Let's be blunt: building a production-grade RAG pipeline is complex. Our goal with Firestarter isn't to be a black box, but a crystal-clear, powerful foundation that anyone can use, understand, and contribute to.
-
-This is just the start. By open-sourcing it, we're inviting you to join us on this journey.
-
--   **Want to add a new vector DB?** Fork the repo and show us what you've got.
--   **Improve the RAG prompt?** Open a pull request.
--   **Have a new feature idea?** Start a discussion in the issues.
-
-We believe that by building in public, we can create a tool that is more accessible, affordable, and adaptable, thanks to the collective intelligence of the open-source community.
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Contributing
-
-We welcome contributions! Please feel free to submit a Pull Request.
-
-## Support
-
-For questions and issues, please open an issue in this repository.
+Lejechat er MIT-licenseret – se `LICENSE`.

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import FirecrawlApp from '@mendable/firecrawl-js'
 import { searchIndex } from '@/lib/upstash-search'
 import { saveIndex } from '@/lib/storage'
-import { serverConfig as config } from '@/firestarter.config'
+import { serverConfig as config } from '@/lejechat.config'
+import { DEFAULT_QUICK_PROMPTS } from '@/lib/quick-prompts'
 
 
 export async function POST(request: NextRequest) {
@@ -10,7 +11,7 @@ export async function POST(request: NextRequest) {
     // Check if creation is disabled
     if (!config.features.enableCreation) {
       return NextResponse.json({ 
-        error: 'Chatbot creation is currently disabled. You can only view existing chatbots.' 
+        error: 'Oprettelse af chatbots er slået fra. Du kan kun se eksisterende chatbots.' 
       }, { status: 403 })
     }
 
@@ -18,25 +19,26 @@ export async function POST(request: NextRequest) {
     try {
       body = await request.json()
     } catch {
-      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+      return NextResponse.json({ error: 'Ugyldig forespørgsel' }, { status: 400 })
     }
     
     const { url, limit = config.crawling.defaultLimit, includePaths, excludePaths } = body
     
     if (!url) {
-      return NextResponse.json({ error: 'URL is required' }, { status: 400 })
+      return NextResponse.json({ error: 'URL er påkrævet' }, { status: 400 })
     }
 
     // Generate unique namespace with timestamp to avoid collisions
     const baseNamespace = new URL(url).hostname.replace(/\./g, '-')
     const timestamp = Date.now()
     const namespace = `${baseNamespace}-${timestamp}`
+    const slug = namespace
     
     // Initialize Firecrawl with API key from environment or headers
     const apiKey = process.env.FIRECRAWL_API_KEY || request.headers.get('X-Firecrawl-API-Key')
     if (!apiKey) {
       return NextResponse.json({ 
-        error: 'Firecrawl API key is not configured. Please provide your API key.' 
+        error: 'Firecrawl API-nøgle er ikke konfigureret. Angiv din API-nøgle.' 
       }, { status: 500 })
     }
     
@@ -106,7 +108,7 @@ export async function POST(request: NextRequest) {
     const documents = crawlResponse.data.map((page, index) => {
       // Get the content and metadata
       const fullContent = page.markdown || page.content || ''
-      const title = page.metadata?.title || 'Untitled'
+      const title = page.metadata?.title || 'Ingen titel'
       const url = page.metadata?.sourceURL || page.url || ''
       const description = page.metadata?.description || page.metadata?.ogDescription || ''
       
@@ -118,8 +120,8 @@ export async function POST(request: NextRequest) {
         id: `${namespace}-${index}`,
         content: {
           text: searchableText,  // Searchable text
-          url: url,  // Required by FirestarterContent
-          title: title  // Required by FirestarterContent
+          url: url,  // Required by LejechatContent
+          title: title  // Required by LejechatContent
         },
         metadata: {
           namespace: namespace,
@@ -189,7 +191,7 @@ export async function POST(request: NextRequest) {
       } else {
       }
     } catch (upsertError) {
-      throw new Error(`Failed to store documents: ${upsertError instanceof Error ? upsertError.message : 'Unknown error'}`)
+      throw new Error(`Kunne ikke gemme dokumenter: ${upsertError instanceof Error ? upsertError.message : 'Ukendt fejl'}`)
     }
     
     // Save index metadata to storage
@@ -202,25 +204,28 @@ export async function POST(request: NextRequest) {
       await saveIndex({
         url,
         namespace,
+        slug,
         pagesCrawled: crawlResponse.data?.length || 0,
         createdAt: new Date().toISOString(),
         metadata: {
           title: homepage?.metadata?.title,
           description: homepage?.metadata?.description || homepage?.metadata?.ogDescription,
           favicon: homepage?.metadata?.favicon,
-          ogImage: homepage?.metadata?.ogImage || homepage?.metadata?.['og:image']
+          ogImage: homepage?.metadata?.ogImage || homepage?.metadata?.['og:image'],
+          quickPrompts: DEFAULT_QUICK_PROMPTS,
         }
       })
     } catch {
       // Continue execution - storage error shouldn't fail the entire operation
-      console.error('Failed to save index metadata')
+      console.error('Kunne ikke gemme indeksmetadata')
     }
     
     return NextResponse.json({
       success: true,
       namespace,
+      slug,
       crawlId,
-      message: `Crawl completed successfully (limited to ${limit} pages)`,
+      message: `Import fuldført (begrænset til ${limit} sider)`,
       details: {
         url,
         pagesLimit: limit,
@@ -231,25 +236,24 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+    const errorMessage = error instanceof Error ? error.message : 'Ukendt fejl opstod'
     const statusCode = error && typeof error === 'object' && 'statusCode' in error ? error.statusCode : undefined
     
     
     // Provide more specific error messages
     if (statusCode === 401) {
       return NextResponse.json(
-        { error: 'Firecrawl authentication failed. Please check your API key.' },
+        { error: 'Firecrawl-godkendelse mislykkedes. Kontrollér din API-nøgle.' },
         { status: 401 }
       )
     }
     
     return NextResponse.json(
       { 
-        error: 'Failed to start crawl',
+        error: 'Kunne ikke starte importen',
         details: errorMessage
       },
       { status: 500 }
     )
   }
 }
-

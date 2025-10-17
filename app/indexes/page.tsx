@@ -7,10 +7,12 @@ import { Button } from "@/components/ui/button"
 import { Globe, FileText, Database, ExternalLink, Trash2, Calendar } from 'lucide-react'
 import { toast } from "sonner"
 import { useStorage } from "@/hooks/useStorage"
+import { normalizeQuickPrompts } from "@/lib/quick-prompts"
 
 interface IndexedSite {
   url: string
   namespace: string
+  slug: string
   pagesCrawled: number
   createdAt: string
   metadata?: {
@@ -30,14 +32,18 @@ export default function IndexesPage() {
     const siteInfo = {
       url: index.url,
       namespace: index.namespace,
+      slug: index.slug,
       pagesCrawled: index.pagesCrawled,
       crawlDate: index.createdAt,
-      metadata: index.metadata || {},
+      metadata: {
+        ...(index.metadata || {}),
+        quickPrompts: normalizeQuickPrompts(index.metadata?.quickPrompts),
+      },
       crawlComplete: true,
       fromIndex: true // Flag to indicate this is from the index list
     }
     
-    sessionStorage.setItem('firestarter_current_data', JSON.stringify(siteInfo))
+    sessionStorage.setItem('lejechat_current_data', JSON.stringify(siteInfo))
     
     // Navigate to the dashboard with namespace parameter
     router.push(`/dashboard?namespace=${index.namespace}`)
@@ -46,12 +52,12 @@ export default function IndexesPage() {
   const handleDeleteIndex = async (index: IndexedSite, e: React.MouseEvent) => {
     e.stopPropagation()
     
-    if (confirm(`Delete chatbot for ${index.metadata?.title || index.url}?`)) {
+    if (confirm(`Slet chatbot for ${index.metadata?.title || index.url}?`)) {
       try {
         await deleteIndex(index.namespace)
-        toast.success('Chatbot deleted successfully')
+        toast.success('Chatbot slettet')
       } catch {
-        toast.error('Failed to delete chatbot')
+        toast.error('Kunne ikke slette chatbotten')
         console.error('Failed to delete index')
       }
     }
@@ -59,22 +65,23 @@ export default function IndexesPage() {
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString)
-    return date.toLocaleDateString('en-US', { 
-      month: 'short', 
-      day: 'numeric', 
+    return date.toLocaleDateString('da-DK', {
+      month: 'short',
+      day: 'numeric',
       year: 'numeric',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      hour12: false
     })
   }
 
   return (
     <div className="px-4 sm:px-6 lg:px-8 py-4 max-w-7xl mx-auto font-inter">
       <div className="flex justify-between items-center mb-8">
-        <Link href="https://www.firecrawl.dev/?utm_source=tool-firestarter" target="_blank" rel="noopener noreferrer">
+        <Link href="https://lejechat.dk" target="_blank" rel="noopener noreferrer">
           <Image
-            src="/firecrawl-logo-with-fire.png"
-            alt="Firecrawl Logo"
+            src="/lejechat-logo.svg"
+            alt="Lejechat Logo"
             width={113}
             height={24}
           />
@@ -85,31 +92,31 @@ export default function IndexesPage() {
           size="sm"
         >
           <Link href="/">
-            Create New Chatbot
+            Opret ny chatbot
           </Link>
         </Button>
       </div>
 
       <div className="mb-8">
-        <h1 className="text-3xl font-semibold text-[#36322F] mb-2">Your Chatbots</h1>
+        <h1 className="text-3xl font-semibold text-[#36322F] mb-2">Dine chatbots</h1>
         <p className="text-gray-600">
-          View and manage all your chatbots
-          {isUsingRedis && <span className="text-xs text-gray-500 ml-2">(using Redis storage)</span>}
+          Se og administrer dine chatbots
+          {isUsingRedis && <span className="text-xs text-gray-500 ml-2">(gemt i Redis)</span>}
         </p>
       </div>
 
       {loading ? (
         <div className="text-center py-10">
-          <p className="text-gray-600">Loading indexes...</p>
+          <p className="text-gray-600">Indlæser oversigten...</p>
         </div>
       ) : indexes.length === 0 ? (
         <div className="text-center py-20">
           <Globe className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-xl font-semibold text-gray-700 mb-2">No Chatbots Yet</h3>
-          <p className="text-gray-600 mb-6">You haven&apos;t created any chatbots yet.</p>
+          <h3 className="text-xl font-semibold text-gray-700 mb-2">Ingen chatbots endnu</h3>
+          <p className="text-gray-600 mb-6">Du har endnu ikke oprettet chatbots.</p>
           <Button asChild variant="orange">
-            <Link href="/firestarter">
-              Create Your First Chatbot
+            <Link href="/">
+              Opret din første chatbot
             </Link>
           </Button>
         </div>
@@ -178,7 +185,7 @@ export default function IndexesPage() {
                     <div className="flex items-center gap-6 mt-4 text-sm text-gray-600">
                       <div className="flex items-center gap-2">
                         <FileText className="w-4 h-4" />
-                        <span>{index.pagesCrawled} pages</span>
+                        <span>{index.pagesCrawled} sider</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Database className="w-4 h-4" />
@@ -200,7 +207,15 @@ export default function IndexesPage() {
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>
-                    <ExternalLink className="w-5 h-5 text-gray-400 group-hover:text-gray-600 transition-colors" />
+                    <Link
+                      href={`/chat/${index.slug}`}
+                      target="_blank"
+                      onClick={(e) => e.stopPropagation()}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-600"
+                      aria-label="Åbn chatbot i nyt vindue"
+                    >
+                      <ExternalLink className="w-5 h-5" />
+                    </Link>
                   </div>
                 </div>
               </div>

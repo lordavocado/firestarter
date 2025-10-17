@@ -1,0 +1,25 @@
+[
+  {
+    "namespace": "demo",
+    "slug": "demo",
+    "url": "https://example.com",
+    "pagesCrawled": 1,
+    "createdAt": "2025-10-17T13:21:00.920Z"
+  },
+  {
+    "namespace": "elmeholm-dk-1760613652944",
+    "slug": "elmeholm-dk-1760613652944",
+    "url": "https://elmeholm.dk",
+    "pagesCrawled": 5,
+    "createdAt": "2025-10-17T13:23:25.915Z",
+    "metadata": {
+      "title": "Elmeholm",
+      "description": "Demo entry inserted manually.",
+      "quickPrompts": [
+        "Har I 3-værelses lejligheder ledige?",
+        "Hvornår er næste indflytningsdato?",
+        "Hvad er depositum på en lejlighed?"
+      ]
+    }
+  }
+]

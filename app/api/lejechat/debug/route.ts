@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
     // 3. Try semantic search
     try {
       const semanticSearch = await searchIndex.search({
-        query: 'homepage website content',
+        query: 'udlejningshjemmeside indhold',
         limit: 10
       })
       results.semanticSearch = {
@@ -76,14 +76,14 @@ export async function GET(request: NextRequest) {
       success: true,
       namespace: namespace,
       results: results,
-      upstashUrl: process.env.UPSTASH_SEARCH_REST_URL ? 'Configured' : 'Not configured',
-      upstashToken: process.env.UPSTASH_SEARCH_REST_TOKEN ? 'Configured' : 'Not configured'
+      upstashUrl: process.env.UPSTASH_SEARCH_REST_URL ? 'Konfigureret' : 'Ikke konfigureret',
+      upstashToken: process.env.UPSTASH_SEARCH_REST_TOKEN ? 'Konfigureret' : 'Ikke konfigureret'
     })
   } catch (error) {
     return NextResponse.json(
       { 
-        error: 'Debug endpoint error',
-        details: error instanceof Error ? error.message : 'Unknown error'
+        error: 'Fejl i debug-endpoint',
+        details: error instanceof Error ? error.message : 'Ukendt fejl'
       },
       { status: 500 }
     )

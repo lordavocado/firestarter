@@ -1,11 +1,13 @@
 'use client'
 
-import { useState, useEffect, useRef, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { MarkdownContent } from "@/components/chat/markdown-content"
 import { Send, Globe, Copy, Check, FileText, Database, ArrowLeft, ExternalLink, BookOpen } from 'lucide-react'
 import Image from 'next/image'
+import Link from 'next/link'
 // Removed useChat - using custom implementation
 import { toast } from "sonner"
 import {
@@ -16,6 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { DEFAULT_QUICK_PROMPTS, normalizeQuickPrompts } from "@/lib/quick-prompts"
 
 interface Source {
   url: string
@@ -26,180 +29,19 @@ interface Source {
 interface SiteData {
   url: string
   namespace: string
+  slug: string
   pagesCrawled: number
   metadata: {
     title: string
-    description: string
+    description?: string
     favicon?: string
     ogImage?: string
+    quickPrompts?: string[]
   }
   crawlId?: string
   crawlComplete?: boolean
   crawlDate?: string
   createdAt?: string
-}
-
-// Simple markdown renderer component
-function MarkdownContent({ content, onSourceClick, isStreaming = false }: { content: string; onSourceClick?: (index: number) => void; isStreaming?: boolean }) {
-  // Simple markdown parsing
-  const parseMarkdown = (text: string) => {
-    // First, handle code blocks to prevent other parsing inside them
-    const codeBlocks: string[] = [];
-    let parsed = text.replace(/```([\s\S]*?)```/g, (_, code) => {
-      const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
-      codeBlocks.push(`<pre class="bg-gray-50 border border-gray-200 p-4 rounded-lg overflow-x-auto my-4 text-sm"><code>${code.trim()}</code></pre>`);
-      return placeholder;
-    });
-    
-    // Handle inline code
-    parsed = parsed.replace(/`([^`]+)`/g, '<code class="bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded text-sm font-mono">$1</code>');
-    
-    // Handle links [text](url) - must come before citations
-    parsed = parsed.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-orange-600 hover:text-orange-700 underline">$1</a>');
-    
-    // Handle citations [1], [2], etc.
-    parsed = parsed.replace(/\[(\d+)\]/g, (_, num) => {
-      return `<sup class="citation text-orange-600 cursor-pointer hover:text-orange-700 font-medium" data-citation="${num}">[${num}]</sup>`;
-    });
-    
-    // Bold text
-    parsed = parsed.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-gray-900">$1</strong>');
-    
-    // Italic text  
-    parsed = parsed.replace(/\*(.+?)\*/g, '<em>$1</em>');
-    
-    // Split into lines for processing
-    const lines = parsed.split('\n');
-    const processedLines = [];
-    let inList = false;
-    let listType = '';
-    let inParagraph = false;
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      const nextLine = i < lines.length - 1 ? lines[i + 1].trim() : '';
-      
-      // Headers
-      if (line.match(/^#{1,3}\s/)) {
-        if (inParagraph) {
-          processedLines.push('</p>');
-          inParagraph = false;
-        }
-        if (line.match(/^###\s(.+)$/)) {
-          processedLines.push(line.replace(/^###\s(.+)$/, '<h3 class="text-base font-semibold mt-4 mb-2 text-gray-900">$1</h3>'));
-        } else if (line.match(/^##\s(.+)$/)) {
-          processedLines.push(line.replace(/^##\s(.+)$/, '<h2 class="text-lg font-semibold mt-5 mb-3 text-gray-900">$1</h2>'));
-        } else if (line.match(/^#\s(.+)$/)) {
-          processedLines.push(line.replace(/^#\s(.+)$/, '<h1 class="text-xl font-bold mt-6 mb-3 text-gray-900">$1</h1>'));
-        }
-        continue;
-      }
-      
-      // Lists
-      const bulletMatch = line.match(/^[-*]\s(.+)$/);
-      const numberedMatch = line.match(/^(\d+)\.\s(.+)$/);
-      
-      if (bulletMatch || numberedMatch) {
-        if (inParagraph) {
-          processedLines.push('</p>');
-          inParagraph = false;
-        }
-        
-        const newListType = bulletMatch ? 'ul' : 'ol';
-        if (!inList) {
-          listType = newListType;
-          processedLines.push(`<${listType} class="${listType === 'ul' ? 'list-disc' : 'list-decimal'} ml-6 my-3 space-y-1">`);
-          inList = true;
-        } else if (listType !== newListType) {
-          processedLines.push(`</${listType}>`);
-          listType = newListType;
-          processedLines.push(`<${listType} class="${listType === 'ul' ? 'list-disc' : 'list-decimal'} ml-6 my-3 space-y-1">`);
-        }
-        
-        const content = bulletMatch ? bulletMatch[1] : numberedMatch![2];
-        processedLines.push(`<li class="text-gray-700 leading-relaxed">${content}</li>`);
-        continue;
-      } else if (inList && line === '') {
-        processedLines.push(`</${listType}>`);
-        inList = false;
-        continue;
-      }
-      
-      // Empty lines
-      if (line === '') {
-        if (inParagraph) {
-          processedLines.push('</p>');
-          inParagraph = false;
-        }
-        if (inList) {
-          processedLines.push(`</${listType}>`);
-          inList = false;
-        }
-        continue;
-      }
-      
-      // Regular text - start new paragraph if needed
-      if (!inParagraph && !inList && !line.startsWith('<')) {
-        processedLines.push('<p class="text-gray-700 leading-relaxed mb-3">');
-        inParagraph = true;
-      }
-      
-      // Add line with space if in paragraph
-      if (inParagraph) {
-        processedLines.push(line + (nextLine && !nextLine.match(/^[-*#]|\d+\./) ? ' ' : ''));
-      } else {
-        processedLines.push(line);
-      }
-    }
-    
-    // Close any open tags
-    if (inParagraph) {
-      processedLines.push('</p>');
-    }
-    if (inList) {
-      processedLines.push(`</${listType}>`);
-    }
-    
-    parsed = processedLines.join('\n');
-    
-    // Restore code blocks
-    codeBlocks.forEach((block, index) => {
-      parsed = parsed.replace(`__CODE_BLOCK_${index}__`, block);
-    });
-    
-    return parsed;
-  };
-
-  useEffect(() => {
-    // Add click handlers for citations
-    const citations = document.querySelectorAll('.citation');
-    citations.forEach(citation => {
-      citation.addEventListener('click', (e) => {
-        const citationNum = parseInt((e.target as HTMLElement).getAttribute('data-citation') || '0');
-        if (onSourceClick && citationNum > 0) {
-          onSourceClick(citationNum - 1);
-        }
-      });
-    });
-
-    return () => {
-      citations.forEach(citation => {
-        citation.removeEventListener('click', () => {});
-      });
-    };
-  }, [content, onSourceClick]);
-
-  return (
-    <div className="relative">
-      <div 
-        className="prose prose-sm max-w-none prose-gray prose-headings:text-gray-900 prose-p:text-gray-700 prose-strong:text-gray-900 prose-code:text-orange-600 prose-code:bg-orange-50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-gray-100 prose-pre:text-gray-800 prose-li:text-gray-700 prose-a:text-orange-600 prose-a:no-underline hover:prose-a:underline"
-        dangerouslySetInnerHTML={{ __html: parseMarkdown(content) }}
-      />
-      {isStreaming && (
-        <span className="inline-block w-1 h-4 bg-gray-600 animate-pulse ml-1" />
-      )}
-    </div>
-  );
 }
 
 function DashboardContent() {
@@ -208,6 +50,7 @@ function DashboardContent() {
   const [siteData, setSiteData] = useState<SiteData | null>(null)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [copiedItem, setCopiedItem] = useState<string | null>(null)
+  const [copiedSnippet, setCopiedSnippet] = useState(false)
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; sources?: Source[] }>>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -215,6 +58,28 @@ function DashboardContent() {
   const [activeTab, setActiveTab] = useState<'curl' | 'javascript' | 'python' | 'openai-js' | 'openai-python'>('curl')
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
+  const chatFormRef = useRef<HTMLFormElement>(null)
+  const [promptFields, setPromptFields] = useState<string[]>(DEFAULT_QUICK_PROMPTS)
+  const [savingPrompts, setSavingPrompts] = useState(false)
+
+  const recordInteraction = (prompt: string) => {
+    if (typeof window === 'undefined' || !siteData) return
+    try {
+      const key = 'lejechat_recent_interactions'
+      const existing = window.localStorage.getItem(key)
+      const parsed: Array<{ slug: string; message: string; origin: string; timestamp: string }> = existing ? JSON.parse(existing) : []
+      const entry = {
+        slug: siteData.slug,
+        message: prompt,
+        origin: 'dashboard',
+        timestamp: new Date().toISOString(),
+      }
+      const updated = [entry, ...parsed].slice(0, 20)
+      window.localStorage.setItem(key, JSON.stringify(updated))
+    } catch (error) {
+      console.warn('Kunne ikke gemme interaktion til diagnosticering', error)
+    }
+  }
 
   useEffect(() => {
     const el = scrollAreaRef.current
@@ -229,6 +94,100 @@ function DashboardContent() {
       el.removeEventListener('scroll', handleScroll)
     }
   }, [])
+
+  useEffect(() => {
+    setPromptFields(normalizeQuickPrompts(siteData?.metadata?.quickPrompts))
+  }, [siteData?.metadata?.quickPrompts])
+
+  const sanitizedPromptFields = useMemo(() => promptFields.map((prompt) => prompt.trim()), [promptFields])
+  const savedQuickPrompts = useMemo(() => normalizeQuickPrompts(siteData?.metadata?.quickPrompts), [siteData?.metadata?.quickPrompts])
+  const suggestionPrompts = useMemo(() => {
+    const current = siteData?.metadata?.quickPrompts
+    if (current && current.length > 0) {
+      return normalizeQuickPrompts(current)
+    }
+    return DEFAULT_QUICK_PROMPTS
+  }, [siteData?.metadata?.quickPrompts])
+  const hasPromptChanges = useMemo(() => {
+    if (sanitizedPromptFields.length !== savedQuickPrompts.length) return true
+    return sanitizedPromptFields.some((value, index) => value !== savedQuickPrompts[index])
+  }, [sanitizedPromptFields, savedQuickPrompts])
+
+  const handlePromptChange = (index: number, value: string) => {
+    setPromptFields((prev) => {
+      const next = [...prev]
+      next[index] = value
+      return next
+    })
+  }
+
+  const resetPrompts = () => {
+    setPromptFields(DEFAULT_QUICK_PROMPTS)
+  }
+
+  const persistQuickPrompts = async () => {
+    if (!siteData) return
+    const trimmed = promptFields.map((prompt) => prompt.trim())
+    if (trimmed.some((prompt) => prompt.length === 0)) {
+      toast.error('Udfyld alle tre starterspørgsmål før du gemmer.')
+      return
+    }
+
+    const normalized = normalizeQuickPrompts(trimmed)
+
+    setSavingPrompts(true)
+    try {
+      const updatedSiteData: SiteData = {
+        ...siteData,
+        metadata: {
+          ...siteData.metadata,
+          quickPrompts: normalized,
+        },
+      }
+      setSiteData(updatedSiteData)
+      setPromptFields(normalized)
+
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('lejechat_current_data', JSON.stringify(updatedSiteData))
+
+        try {
+          const stored = window.localStorage.getItem('lejechat_indexes')
+          if (stored) {
+            const indexes = JSON.parse(stored)
+            const indexPosition = Array.isArray(indexes)
+              ? indexes.findIndex((item: { namespace?: string }) => item?.namespace === updatedSiteData.namespace)
+              : -1
+            if (indexPosition >= 0) {
+              indexes[indexPosition] = {
+                ...indexes[indexPosition],
+                metadata: {
+                  ...(indexes[indexPosition]?.metadata || {}),
+                  quickPrompts: normalized,
+                },
+              }
+              window.localStorage.setItem('lejechat_indexes', JSON.stringify(indexes))
+            }
+          }
+        } catch (storageError) {
+          console.warn('Kunne ikke opdatere lokale starterspørgsmål', storageError)
+        }
+      }
+
+      try {
+        await fetch('/api/indexes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedSiteData),
+        })
+      } catch (apiError) {
+        console.warn('Kunne ikke synkronisere starterspørgsmål til serveren', apiError)
+      }
+
+      toast.success('Starterspørgsmål opdateret')
+    } finally {
+      setSavingPrompts(false)
+    }
+  }
 
   // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
@@ -247,20 +206,21 @@ function DashboardContent() {
     setMessages(prev => [...prev, userMessage])
     setInput('')
     setIsLoading(true)
+    recordInteraction(processedInput)
     
     try {
-      const response = await fetch('/api/firestarter/query', {
+      const response = await fetch('/api/lejechat/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [userMessage],
           namespace: siteData.namespace,
-          stream: true
+          stream: false
         })
       })
 
       if (!response.ok) {
-        throw new Error('Failed to get response')
+        throw new Error('Kunne ikke hente svar')
       }
 
       const reader = response.body?.getReader()
@@ -347,7 +307,7 @@ function DashboardContent() {
         }
       }
     } catch {
-      toast.error('Failed to get response')
+      toast.error('Kunne ikke hente svar')
       console.error('Query failed')
     } finally {
       setIsLoading(false)
@@ -360,14 +320,22 @@ function DashboardContent() {
     
     if (namespaceParam) {
       // Try to load data for this specific namespace
-      const storedIndexes = localStorage.getItem('firestarter_indexes')
+      const storedIndexes = localStorage.getItem('lejechat_indexes')
       if (storedIndexes) {
         const indexes = JSON.parse(storedIndexes)
         const matchingIndex = indexes.find((idx: { namespace: string }) => idx.namespace === namespaceParam)
         if (matchingIndex) {
-          setSiteData(matchingIndex)
+          const normalizedMatch = {
+            ...matchingIndex,
+            slug: matchingIndex.slug || matchingIndex.namespace,
+            metadata: {
+              ...(matchingIndex.metadata || {}),
+              quickPrompts: normalizeQuickPrompts(matchingIndex.metadata?.quickPrompts),
+            },
+          }
+          setSiteData(normalizedMatch)
           // Also update sessionStorage for consistency
-          sessionStorage.setItem('firestarter_current_data', JSON.stringify(matchingIndex))
+          sessionStorage.setItem('lejechat_current_data', JSON.stringify(normalizedMatch))
           // Clear messages when namespace changes
           setMessages([])
         } else {
@@ -379,10 +347,18 @@ function DashboardContent() {
       }
     } else {
       // Fallback to sessionStorage if no namespace param
-      const data = sessionStorage.getItem('firestarter_current_data')
+      const data = sessionStorage.getItem('lejechat_current_data')
       if (data) {
         const parsedData = JSON.parse(data)
-        setSiteData(parsedData)
+        const normalizedParsed = {
+          ...parsedData,
+          slug: parsedData.slug || parsedData.namespace,
+          metadata: {
+            ...(parsedData.metadata || {}),
+            quickPrompts: normalizeQuickPrompts(parsedData.metadata?.quickPrompts),
+          },
+        }
+        setSiteData(normalizedParsed)
         // Add namespace to URL for consistency
         router.replace(`/dashboard?namespace=${parsedData.namespace}`)
       } else {
@@ -402,14 +378,14 @@ function DashboardContent() {
 
   const handleDelete = () => {
     // Remove from localStorage
-    const storedIndexes = localStorage.getItem('firestarter_indexes')
+    const storedIndexes = localStorage.getItem('lejechat_indexes')
     if (storedIndexes && siteData) {
       const indexes = JSON.parse(storedIndexes)
       const updatedIndexes = indexes.filter((idx: { namespace: string }) => idx.namespace !== siteData.namespace)
-      localStorage.setItem('firestarter_indexes', JSON.stringify(updatedIndexes))
+      localStorage.setItem('lejechat_indexes', JSON.stringify(updatedIndexes))
     }
     
-    sessionStorage.removeItem('firestarter_current_data')
+    sessionStorage.removeItem('lejechat_current_data')
     router.push('/indexes')
   }
 
@@ -420,17 +396,9 @@ function DashboardContent() {
   }
 
 
-  if (!siteData) {
-    return (
-      <div className="min-h-screen bg-[#FBFAF9] flex items-center justify-center">
-        <div className="text-gray-600">Loading...</div>
-      </div>
-    )
-  }
-  
+  const namespace = siteData?.namespace ?? ''
+  const slug = siteData?.slug ?? ''
 
-  const modelName = `firecrawl-${siteData.namespace}`
-  
   // Get dynamic API URL based on current location
   const getApiUrl = () => {
     if (typeof window === 'undefined') return 'http://localhost:3001/api/v1/chat/completions'
@@ -440,27 +408,67 @@ function DashboardContent() {
   }
   const apiUrl = getApiUrl()
   
-  const curlCommand = `# Standard request
+  const modelName = namespace ? `lejechat-${namespace}` : ''
+  
+  const embedSnippet = useMemo(() => {
+    if (!slug) return ''
+    if (typeof window === 'undefined') {
+      return `<script src="/embed/lejechat?slug=${slug}" defer></script>`
+    }
+    return `<script src="${window.location.origin}/embed/lejechat?slug=${slug}" defer></script>`
+  }, [slug])
+
+  const lastIndexedTimestamp = siteData?.createdAt || siteData?.crawlDate || ''
+  const lastIndexedText = useMemo(() => {
+    if (!lastIndexedTimestamp) return 'Ukendt'
+    const date = new Date(lastIndexedTimestamp)
+    if (Number.isNaN(date.getTime())) return 'Ukendt'
+    return date.toLocaleString('da-DK', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }, [lastIndexedTimestamp])
+
+  const isIndexing = siteData?.crawlComplete === false
+  const crawlStatusLabel = isIndexing ? 'Indekserer indhold' : 'Klar til spørgsmål'
+  const crawlStatusClasses = isIndexing
+    ? 'bg-amber-100 text-amber-700 border border-amber-200'
+    : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+  const crawlStatusDescription = isIndexing
+    ? 'Vi henter stadig sider – svarene bliver endnu bedre om et øjeblik.'
+    : 'Denne chatbot bruger den seneste import og kan deles med lejere med det samme.'
+
+  if (!siteData) {
+    return (
+      <div className="min-h-screen bg-[#FBFAF9] flex items-center justify-center">
+        <div className="text-gray-600">Indlæser...</div>
+      </div>
+    )
+  }
+  
+  const curlCommand = `# Standardforespørgsel
 curl ${apiUrl} \\
   -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_FIRESTARTER_API_KEY" \\
+  -H "Authorization: Bearer YOUR_LEJECHAT_API_KEY" \\
   -d '{
     "model": "${modelName}",
     "messages": [
-      {"role": "user", "content": "Your question here"}
+      {"role": "user", "content": "Dit spørgsmål her"}
     ]
   }'
 
-# Streaming request (SSE format)
+# Streamingforespørgsel (SSE-format)
 curl ${apiUrl} \\
   -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_FIRESTARTER_API_KEY" \\
+  -H "Authorization: Bearer YOUR_LEJECHAT_API_KEY" \\
   -H "Accept: text/event-stream" \\
   -N \\
   -d '{
     "model": "${modelName}",
     "messages": [
-      {"role": "user", "content": "Your question here"}
+      {"role": "user", "content": "Dit spørgsmål her"}
     ],
     "stream": true
   }'`
@@ -468,24 +476,24 @@ curl ${apiUrl} \\
   const openaiJsCode = `import OpenAI from 'openai';
 
 const openai = new OpenAI({
-  apiKey: 'YOUR_FIRESTARTER_API_KEY',
+  apiKey: 'YOUR_LEJECHAT_API_KEY',
   baseURL: '${apiUrl.replace('/chat/completions', '')}',
 });
 
 const completion = await openai.chat.completions.create({
   model: '${modelName}',
   messages: [
-    { role: 'user', content: 'Your question here' }
+    { role: 'user', content: 'Dit spørgsmål her' }
   ],
 });
 
 console.log(completion.choices[0].message.content);
 
-// Streaming example
+// Streaming-eksempel
 const stream = await openai.chat.completions.create({
   model: '${modelName}',
   messages: [
-    { role: 'user', content: 'Your question here' }
+    { role: 'user', content: 'Dit spørgsmål her' }
   ],
   stream: true,
 });
@@ -494,27 +502,27 @@ for await (const chunk of stream) {
   process.stdout.write(chunk.choices[0]?.delta?.content || '');
 }`
   
-  const openaiPythonCode = `from openai import OpenAI
+const openaiPythonCode = `from openai import OpenAI
 
 client = OpenAI(
-    api_key="YOUR_FIRESTARTER_API_KEY",
+    api_key="YOUR_LEJECHAT_API_KEY",
     base_url="${apiUrl.replace('/chat/completions', '')}"
 )
 
 completion = client.chat.completions.create(
     model="${modelName}",
     messages=[
-        {"role": "user", "content": "Your question here"}
+        {"role": "user", "content": "Dit spørgsmål her"}
     ]
 )
 
 print(completion.choices[0].message.content)
 
-# Streaming example
+# Streaming-eksempel
 stream = client.chat.completions.create(
     model="${modelName}",
     messages=[
-        {"role": "user", "content": "Your question here"}
+        {"role": "user", "content": "Dit spørgsmål her"}
     ],
     stream=True
 )
@@ -523,17 +531,17 @@ for chunk in stream:
     if chunk.choices[0].delta.content is not None:
         print(chunk.choices[0].delta.content, end="")`
   
-  const jsCode = `// Using fetch API
+const jsCode = `// Using fetch API
 const response = await fetch('${apiUrl}', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
-    'Authorization': 'Bearer YOUR_FIRESTARTER_API_KEY'
+    'Authorization': 'Bearer YOUR_LEJECHAT_API_KEY'
   },
   body: JSON.stringify({
     model: '${modelName}',
     messages: [
-      { role: 'user', content: 'Your question here' }
+      { role: 'user', content: 'Dit spørgsmål her' }
     ]
   })
 });
@@ -541,18 +549,18 @@ const response = await fetch('${apiUrl}', {
 const data = await response.json();
 console.log(data.choices[0].message.content);`
   
-  const pythonCode = `import requests
+const pythonCode = `import requests
 
 response = requests.post(
     '${apiUrl}',
     headers={
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer YOUR_FIRESTARTER_API_KEY'
+        'Authorization': 'Bearer YOUR_LEJECHAT_API_KEY'
     },
     json={
         'model': '${modelName}',
         'messages': [
-            {'role': 'user', 'content': 'Your question here'}
+            {'role': 'user', 'content': 'Dit spørgsmål her'}
         ]
     }
 )
@@ -608,7 +616,7 @@ print(data['choices'][0]['message']['content'])`
               variant="code"
               size="sm"
             >
-              Delete
+              Slet
             </Button>
           </div>
         </div>
@@ -642,14 +650,14 @@ print(data['choices'][0]['message']['content'])`
                       ? siteData.metadata.title.substring(0, 27) + '...' 
                       : siteData.metadata.title}
                   </h2>
-                  <p className="text-xs text-gray-600">Knowledge Base</p>
+                  <p className="text-xs text-gray-600">Vidensbase</p>
                 </div>
                 
                 <div className="space-y-2 flex-1">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-gray-700">
                       <FileText className="w-4 h-4" />
-                      <span className="text-sm font-medium">Pages</span>
+                      <span className="text-sm font-medium">Sider</span>
                     </div>
                     <span className="text-lg font-semibold text-[#36322F]">{siteData.pagesCrawled}</span>
                   </div>
@@ -657,7 +665,7 @@ print(data['choices'][0]['message']['content'])`
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-gray-700">
                       <Database className="w-4 h-4" />
-                      <span className="text-sm font-medium">Chunks</span>
+                      <span className="text-sm font-medium">Tekststykker</span>
                     </div>
                     <span className="text-lg font-semibold text-[#36322F]">{Math.round(siteData.pagesCrawled * 3)}</span>
                   </div>
@@ -665,7 +673,7 @@ print(data['choices'][0]['message']['content'])`
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-gray-700">
                       <Globe className="w-4 h-4" />
-                      <span className="text-sm font-medium">Namespace</span>
+                      <span className="text-sm font-medium">Navnerum</span>
                     </div>
                     <span className="text-xs font-mono text-gray-800 break-all">{siteData.namespace.split('-').slice(0, -1).join('.')}</span>
                   </div>
@@ -673,20 +681,76 @@ print(data['choices'][0]['message']['content'])`
               </div>
             </div>
 
+            <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-medium text-gray-700">Status</span>
+                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${crawlStatusClasses}`}>
+                  {crawlStatusLabel}
+                </span>
+              </div>
+              <p className="text-sm text-gray-600 mb-4">
+                {crawlStatusDescription}
+              </p>
+              <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-500">
+                <span className="block text-gray-600 font-medium">Senest opdateret</span>
+                <span className="block text-gray-700 mt-1">{lastIndexedText}</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
+              <h2 className="text-lg font-semibold text-[#36322F] mb-2">Starterspørgsmål</h2>
+              <p className="text-xs text-gray-600 mb-4">
+                Vælg de tre spørgsmål lejere oftest stiller. De vises i chat-knappen som hurtige genveje.
+              </p>
+              <div className="space-y-3">
+                {promptFields.map((prompt, index) => (
+                  <div key={index}>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Spørgsmål {index + 1}</label>
+                    <Input
+                      value={prompt}
+                      onChange={(event) => handlePromptChange(index, event.target.value)}
+                      placeholder={`F.eks. ${DEFAULT_QUICK_PROMPTS[index]}`}
+                      disabled={savingPrompts}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between gap-2 mt-4">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={resetPrompts}
+                  disabled={savingPrompts}
+                >
+                  Nulstil til standard
+                </Button>
+                <Button
+                  type="button"
+                  variant="orange"
+                  size="sm"
+                  onClick={persistQuickPrompts}
+                  disabled={!hasPromptChanges || savingPrompts}
+                >
+                  {savingPrompts ? 'Gemmer…' : 'Gem starterspørgsmål'}
+                </Button>
+              </div>
+            </div>
+
             <div className="bg-white rounded-xl p-6 border border-gray-200 flex flex-col flex-1">
-              <h2 className="text-lg font-semibold text-[#36322F] mb-4">Quick Start</h2>
+              <h2 className="text-lg font-semibold text-[#36322F] mb-4">Hurtig start</h2>
               <div className="space-y-4 flex-1">
                 <div>
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">1. Test in Dashboard</h3>
-                  <p className="text-xs text-gray-600">Use the chat panel to test responses and refine your queries</p>
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">1. Test i dashboardet</h3>
+                  <p className="text-xs text-gray-600">Brug chatpanelet til at teste svar og justere dine spørgsmål</p>
                 </div>
                 <div>
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">2. Get API Access</h3>
-                  <p className="text-xs text-gray-600">Click below to see integration code in multiple languages</p>
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">2. Få API-adgang</h3>
+                  <p className="text-xs text-gray-600">Se integrationskode på flere sprog nedenfor</p>
                 </div>
                 <div>
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">3. Deploy Anywhere</h3>
-                  <p className="text-xs text-gray-600">Deploy chatbot script OR OpenAI-compatible endpoint API</p>
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">3. Implementer hvor som helst</h3>
+                  <p className="text-xs text-gray-600">Udrul chatbot-script eller OpenAI-kompatibelt endpoint</p>
                 </div>
               </div>
               <div className="mt-8">
@@ -695,13 +759,42 @@ print(data['choices'][0]['message']['content'])`
                   variant="orange"
                   className="w-full"
                 >
-                  View Integration Code
+                  Vis integrationskode
                 </Button>
               </div>
             </div>
+
+            <div className="bg-white rounded-xl p-6 border border-dashed border-gray-300 flex flex-col gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-[#36322F] mb-2">Indsæt på dit website</h2>
+                <p className="text-xs text-gray-600">
+                  Kopier scriptet og placer det lige før <code>&lt;/body&gt;</code> for at få Lejechat som flydende chatknap.
+                </p>
+              </div>
+              <div className="flex items-start gap-2">
+                <code className="block rounded-md bg-gray-100 px-3 py-2 text-[11px] text-gray-700 leading-5 flex-1 whitespace-pre-wrap">{embedSnippet}</code>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(embedSnippet)
+                      setCopiedSnippet(true)
+                      setTimeout(() => setCopiedSnippet(false), 2000)
+                    } catch {
+                      toast.error('Kunne ikke kopiere snippet')
+                    }
+                  }}
+                >
+                  {copiedSnippet ? 'Kopieret' : 'Kopier'}
+                </Button>
+              </div>
+              <p className="text-xs text-gray-500">Tilpas farve, tekst og placering via URL-parametre `accent`, `label` og `position=bottom-left`.</p>
+            </div>
           </div>
 
-          {/* Chat Panel and Sources - Show below on mobile */}
+          {/* Chat Panel and Kilder - Show below on mobile */}
           <div className="lg:w-3/4 lg:h-full">
             <div className="flex flex-col lg:flex-row gap-6 lg:h-full">
               {/* Chat Panel */}
@@ -724,11 +817,30 @@ print(data['choices'][0]['message']['content'])`
                         )}
                       </div>
                       <h3 className="text-lg font-semibold text-[#36322F] mb-2">
-                        Chat with {siteData.metadata.title}
+                        Chat med {siteData.metadata.title}
                       </h3>
                       <p className="text-gray-600">
-                        Ask anything about their {siteData.pagesCrawled} indexed pages
+                        Spørg om deres {siteData.pagesCrawled} indekserede sider
                       </p>
+                      <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+                        {suggestionPrompts.map((prompt, index) => (
+                          <button
+                            key={`${prompt}-${index}`}
+                            type="button"
+                            onClick={() => {
+                              if (isLoading) return
+                              setInput(prompt)
+                              setTimeout(() => {
+                                chatFormRef.current?.requestSubmit()
+                              }, 0)
+                            }}
+                            className="px-4 py-2 rounded-full border border-orange-200 bg-orange-50 text-sm text-orange-600 hover:bg-orange-100 transition disabled:opacity-50"
+                            disabled={isLoading}
+                          >
+                            {prompt}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 
@@ -777,13 +889,13 @@ print(data['choices'][0]['message']['content'])`
                 </div>
                 
                 
-                <form onSubmit={handleSubmit} className="p-4 border-t border-gray-200">
+                <form ref={chatFormRef} onSubmit={handleSubmit} className="p-4 border-t border-gray-200">
                   <div className="relative">
                     <Input
                       type="text"
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
-                      placeholder={`Ask about ${siteData.metadata.title}...`}
+                      placeholder={`Spørg til ${siteData.metadata.title}...`}
                       className="w-full pr-12 placeholder:text-gray-400"
                       disabled={isLoading}
                     />
@@ -798,7 +910,7 @@ print(data['choices'][0]['message']['content'])`
                 </form>
               </div>
               
-              {/* Sources Panel - Shows on right side when available */}
+              {/* Kilder Panel - Shows on right side when available */}
               <div className="hidden lg:block lg:w-1/3">
                 <div className="bg-white rounded-xl p-6 border border-gray-200 flex flex-col h-full overflow-hidden">
                   {(() => {
@@ -811,10 +923,10 @@ print(data['choices'][0]['message']['content'])`
                           <div className="flex items-center justify-between mb-4 animate-fade-in">
                             <h2 className="text-lg font-semibold text-[#36322F] flex items-center gap-2">
                               <BookOpen className="w-5 h-5 text-orange-500" />
-                              Sources
+                              Kilder
                             </h2>
                             <span className="text-xs text-gray-500 bg-orange-50 px-2 py-1 rounded-full">
-                              {lastAssistantMessage.sources?.length || 0} references
+                              {lastAssistantMessage.sources?.length || 0} henvisninger
                             </span>
                           </div>
                           
@@ -864,7 +976,7 @@ print(data['choices'][0]['message']['content'])`
                         <div className="flex items-center justify-between mb-4">
                           <h2 className="text-lg font-semibold text-[#36322F] flex items-center gap-2">
                             <Database className="w-5 h-5 text-gray-400" />
-                            Knowledge Base
+                            Vidensbase
                           </h2>
                         </div>
                         
@@ -877,29 +989,29 @@ print(data['choices'][0]['message']['content'])`
                               </div>
                             </div>
                             <p className="text-sm font-medium text-gray-700 mb-1">
-                              {siteData.pagesCrawled} pages indexed
+                              {siteData.pagesCrawled} indekserede sider
                             </p>
                             <p className="text-xs text-gray-500 mb-6">
-                              Ready to answer questions about {siteData.metadata.title}
+                              Klar til at besvare spørgsmål om {siteData.metadata.title}
                             </p>
                             <div className="space-y-2 text-left">
                               <div className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg border border-gray-200">
-                                <span className="text-xs text-gray-600">Total chunks</span>
+                                <span className="text-xs text-gray-600">Samlede tekststykker</span>
                                 <span className="text-xs font-medium text-gray-800 bg-white px-2 py-1 rounded">
                                   {Math.round(siteData.pagesCrawled * 3)}
                                 </span>
                               </div>
                               <div className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg border border-gray-200">
-                                <span className="text-xs text-gray-600">Crawl date</span>
+                                <span className="text-xs text-gray-600">Indekseringsdato</span>
                                 <span className="text-xs font-medium text-gray-800 bg-white px-2 py-1 rounded">
                                   {(() => {
                                     const dateString = siteData.crawlDate || siteData.createdAt;
-                                    return dateString ? new Date(dateString).toLocaleDateString() : 'N/A';
+                                    return dateString ? new Date(dateString).toLocaleDateString('da-DK') : 'Ikke tilgængelig';
                                   })()}
                                 </span>
                               </div>
                               <div className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg border border-gray-200">
-                                <span className="text-xs text-gray-600">Namespace</span>
+                                <span className="text-xs text-gray-600">Navnerum</span>
                                 <span className="text-xs font-mono text-gray-800 truncate max-w-[140px] bg-white px-2 py-1 rounded">
                                   {siteData.namespace.split('-').slice(0, -1).join('.')}
                                 </span>
@@ -913,17 +1025,25 @@ print(data['choices'][0]['message']['content'])`
                 </div>
               </div>
             </div>
+            <div className="flex items-center gap-2">
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/chat/${siteData.slug}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2">
+                  <ExternalLink className="w-4 h-4" />
+                  Åbn offentlig chatbot
+                </Link>
+              </Button>
+            </div>
           </div>
         </div>
       </div>
       
-      {/* Delete Confirmation Modal */}
+      {/* Slet Confirmation Modal */}
       <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
         <DialogContent className="sm:max-w-md bg-white z-50">
           <DialogHeader>
-            <DialogTitle>Delete Index</DialogTitle>
+            <DialogTitle>Slet indeks</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete the index for {siteData.metadata.title}? This action cannot be undone.
+              Er du sikker på, at du vil slette indekset for {siteData.metadata.title}? Denne handling kan ikke fortrydes.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex gap-2">
@@ -932,14 +1052,14 @@ print(data['choices'][0]['message']['content'])`
               onClick={() => setShowDeleteModal(false)}
               className="font-medium"
             >
-              Cancel
+              Annuller
             </Button>
             <Button
               variant="orange"
               onClick={handleDelete}
               className="font-medium"
             >
-              Delete
+              Slet
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -949,15 +1069,15 @@ print(data['choices'][0]['message']['content'])`
       <Dialog open={showApiModal} onOpenChange={setShowApiModal}>
         <DialogContent className="sm:max-w-3xl bg-white z-50 max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>API Access</DialogTitle>
+            <DialogTitle>API-adgang</DialogTitle>
             <DialogDescription>
-              Use this index with any OpenAI-compatible API client.
+              Brug dette indeks med enhver OpenAI-kompatibel API-klient.
             </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-3 mb-6">
             <div>
-              <span className="text-sm text-gray-600">Model Name:</span>
+              <span className="text-sm text-gray-600">Modelnavn:</span>
               <code className="ml-2 text-sm text-orange-600">{modelName}</code>
             </div>
             <div>
@@ -1025,11 +1145,11 @@ print(data['choices'][0]['message']['content'])`
             <div className="bg-gray-900 rounded-lg p-4">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm font-medium text-gray-300">
-                  {activeTab === 'curl' && 'cURL Command'}
+                  {activeTab === 'curl' && 'cURL-kommando'}
                   {activeTab === 'javascript' && 'JavaScript (Fetch API)'}
                   {activeTab === 'python' && 'Python (Requests)'}
-                  {activeTab === 'openai-js' && 'OpenAI SDK for JavaScript'}
-                  {activeTab === 'openai-python' && 'OpenAI SDK for Python'}
+                  {activeTab === 'openai-js' && 'OpenAI SDK til JavaScript'}
+                  {activeTab === 'openai-python' && 'OpenAI SDK til Python'}
                 </span>
                 <button
                   onClick={() => copyToClipboard(
@@ -1043,7 +1163,7 @@ print(data['choices'][0]['message']['content'])`
                   className="text-sm text-orange-400 hover:text-orange-300 flex items-center gap-1 transition-colors"
                 >
                   {copiedItem === activeTab ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                  {copiedItem === activeTab ? 'Copied!' : 'Copy'}
+                  {copiedItem === activeTab ? 'Kopieret!' : 'Kopier'}
                 </button>
               </div>
               <pre className="text-sm text-gray-100 overflow-x-auto">
@@ -1073,7 +1193,7 @@ export default function DashboardPage() {
               <div className="w-12 h-12 text-orange-600 mx-auto mb-4 animate-spin">
                 <Database className="w-full h-full" />
               </div>
-              <p className="text-gray-600">Loading dashboard...</p>
+              <p className="text-gray-600">Indlæser dashboard...</p>
             </div>
           </div>
         </div>

@@ -6,17 +6,17 @@ const searchClient = new Search({
   token: process.env.UPSTASH_SEARCH_REST_TOKEN!,
 })
 
-// Create a search index for firestarter documents
-export const searchIndex = searchClient.index<FirestarterContent>('firestarter')
+// Create a search index for Lejechat documents
+export const searchIndex = searchClient.index<LejechatContent>('lejechat')
 
-export interface FirestarterContent {
+export interface LejechatContent {
   text: string
   url: string
   title: string
   [key: string]: unknown // Add index signature for Upstash type compatibility
 }
 
-export interface FirestarterIndex {
+export interface LejechatIndex {
   namespace: string
   url: string
   pagesCrawled: number

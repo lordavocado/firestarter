@@ -1,10 +1,10 @@
 import { NextRequest } from 'next/server'
 import { streamText } from 'ai'
 import { groq } from '@ai-sdk/groq'
-import { openai } from '@ai-sdk/openai'
 import { anthropic } from '@ai-sdk/anthropic'
 import { searchIndex } from '@/lib/upstash-search'
-import { serverConfig as config } from '@/firestarter.config'
+import { serverConfig as config } from '@/lejechat.config'
+import { callOpenAIResponses } from '@/lib/openai-responses'
 
 // Get AI model at runtime on server
 const getModel = () => {
@@ -13,13 +13,10 @@ const getModel = () => {
     if (process.env.GROQ_API_KEY) {
       return groq('meta-llama/llama-4-scout-17b-16e-instruct')
     }
-    if (process.env.OPENAI_API_KEY) {
-      return openai('gpt-4o')
-    }
     if (process.env.ANTHROPIC_API_KEY) {
       return anthropic('claude-3-5-sonnet-20241022')
     }
-    throw new Error('No AI provider configured. Please set GROQ_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY')
+    throw new Error('Ingen AI-udbyder er konfigureret. Angiv GROQ_API_KEY eller ANTHROPIC_API_KEY')
   } catch (error) {
     throw error
   }
@@ -42,7 +39,7 @@ export async function POST(request: NextRequest) {
     
     if (!query || !namespace) {
       return new Response(
-        JSON.stringify({ error: 'Query and namespace are required' }), 
+        JSON.stringify({ error: 'Spørgsmål og navnerum er påkrævet' }), 
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       )
     }
@@ -131,43 +128,48 @@ export async function POST(request: NextRequest) {
         }
       }
       
-    } catch {
-      console.error('Search failed')
+    } catch (error) {
+      console.error('Search failed', error)
       documents = []
     }
     
     // Check if we have any data for this namespace
     if (documents.length === 0) {
       
-      const answer = `I don't have any indexed content for this website. Please make sure the website has been crawled first.`
+      const answer = `Jeg har ikke indekseret indhold for dette website. Sørg for at siden er blevet importeret først.`
       const sources: never[] = []
       
       if (stream) {
-        // Create a simple text stream for the answer
-        const result = await streamText({
-          model: getModel(),
-          prompt: answer,
-          maxTokens: 1,
-          temperature: 0,
+        const encoder = new TextEncoder()
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode(`8:${JSON.stringify({ sources })}\n`))
+            controller.enqueue(encoder.encode(`0:${JSON.stringify(answer)}\n`))
+            controller.close()
+          }
         })
-        
-        return result.toDataStreamResponse()
-      } else {
-        return new Response(
-          JSON.stringify({ answer, sources }), 
-          { headers: { 'Content-Type': 'application/json' } }
-        )
+
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/plain; charset=utf-8'
+          }
+        })
       }
+
+      return new Response(
+        JSON.stringify({ answer, sources }), 
+        { headers: { 'Content-Type': 'application/json' } }
+      )
     }
 
     // Check if we have any AI provider configured
     try {
       const model = getModel()
       if (!model) {
-        throw new Error('No AI model available')
+        throw new Error('Ingen AI-model tilgængelig')
       }
     } catch {
-      const answer = 'AI service is not configured. Please set GROQ_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY in your environment variables.'
+      const answer = 'AI-tjenesten er ikke konfigureret. Angiv GROQ_API_KEY, OPENAI_API_KEY eller ANTHROPIC_API_KEY i miljøvariablerne.'
       return new Response(
         JSON.stringify({ answer, sources: [] }), 
         { headers: { 'Content-Type': 'application/json' } }
@@ -184,15 +186,12 @@ export async function POST(request: NextRequest) {
     }
     
     const transformedDocuments: TransformedDocument[] = documents.map((result) => {
-      const title = result.metadata?.title || result.metadata?.pageTitle || 'Untitled'
+      const title = result.metadata?.title || result.metadata?.pageTitle || 'Ingen titel'
       const description = result.metadata?.description || ''
       const url = result.metadata?.url || result.metadata?.sourceURL || ''
       
       // Get content from the document - prefer full content from metadata, fallback to searchable text
       const rawContent = result.metadata?.fullContent || result.content?.text || ''
-      
-      if (!rawContent) {
-      }
       
       // Create structured content with clear metadata headers
       const structuredContent = `TITLE: ${title}
@@ -241,8 +240,8 @@ ${rawContent}`
     
     // If context is empty, log error
     if (!context || context.length < 100) {
-      
-      const answer = 'I found some relevant pages but couldn\'t extract enough content to answer your question. This might be due to the way the pages were crawled. Try crawling the website again with a higher page limit.'
+      console.warn('Context too short for namespace', namespace, 'docs considered', docsToUse.length)
+      const answer = 'Jeg fandt relevante sider, men kunne ikke udlede nok indhold til at besvare dit spørgsmål. Prøv at importere hjemmesiden igen med en højere sidelimit.'
       const sources = docsToUse.map((doc) => ({
         url: doc.url,
         title: doc.title,
@@ -265,24 +264,34 @@ ${rawContent}`
 
     // Generate response using Vercel AI SDK
     try {
-      
       const systemPrompt = config.ai.systemPrompt
+      const userPrompt = `Spørgsmål: ${query}\n\nRelevant indhold fra websitet:\n${context}\n\nGiv et fyldestgørende svar ud fra oplysningerne.`
 
-      const userPrompt = `Question: ${query}\n\nRelevant content from the website:\n${context}\n\nPlease provide a comprehensive answer based on this information.`
+      if (process.env.OPENAI_API_KEY) {
+        try {
+          const answer = await callOpenAIResponses({ systemPrompt, userPrompt })
+          return new Response(
+            JSON.stringify({ answer, sources }),
+            { headers: { 'Content-Type': 'application/json' } }
+          )
+        } catch (openaiError) {
+          const message = openaiError instanceof Error ? openaiError.message : 'Ukendt OpenAI-fejl'
+          console.error('OpenAI Responses API fejlede', openaiError)
+          const answer = `Fejl under generering af svar: ${message}`
+          return new Response(
+            JSON.stringify({ answer, sources }),
+            { headers: { 'Content-Type': 'application/json' } }
+          )
+        }
+      }
 
-      
-      // Log a sample of the actual content being sent
-
+      const providerModel = getModel()
 
       if (stream) {
-        
         let result
         try {
-          const model = getModel()
-          
-          // Stream the response
           result = await streamText({
-            model: model,
+            model: providerModel,
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: userPrompt }
@@ -290,48 +299,39 @@ ${rawContent}`
             temperature: config.ai.temperature,
             maxTokens: config.ai.maxTokens
           })
-          
         } catch (streamError) {
           throw streamError
         }
-        
-        // Create a streaming response with sources
-        
-        // Always use custom streaming to include sources
-        // The built-in toDataStreamResponse doesn't include our sources
+
         const encoder = new TextEncoder()
-        
+
         const stream = new ReadableStream({
           async start(controller) {
-            // Send sources as initial data
             const sourcesData = { sources }
             const sourcesLine = `8:${JSON.stringify(sourcesData)}\n`
             controller.enqueue(encoder.encode(sourcesLine))
-            
-            // Stream the text
+
             try {
               for await (const textPart of result.textStream) {
-                // Format as Vercel AI SDK expects
                 const escaped = JSON.stringify(textPart)
                 controller.enqueue(encoder.encode(`0:${escaped}\n`))
               }
-            } catch {
-              console.error('Stream processing failed')
+            } catch (streamProcessingError) {
+              console.error('Stream processing failed', streamProcessingError)
             }
-            
+
             controller.close()
           }
         })
-        
+
         return new Response(stream, {
           headers: {
             'Content-Type': 'text/plain; charset=utf-8'
           }
         })
       } else {
-        // Non-streaming response
         const result = await streamText({
-          model: getModel(),
+          model: providerModel,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt }
@@ -339,28 +339,27 @@ ${rawContent}`
           temperature: config.ai.temperature,
           maxTokens: config.ai.maxTokens
         })
-        
-        // Get the full text
+
         let answer = ''
         for await (const textPart of result.textStream) {
           answer += textPart
         }
-        
+
         return new Response(
-          JSON.stringify({ answer, sources }), 
+          JSON.stringify({ answer, sources }),
           { headers: { 'Content-Type': 'application/json' } }
         )
       }
-      
+
     } catch (groqError) {
-      
-      const errorMessage = groqError instanceof Error ? groqError.message : 'Unknown error'
-      let answer = `Error generating response: ${errorMessage}`
+      const errorMessage = groqError instanceof Error ? groqError.message : 'Ukendt fejl'
+      console.error('AI generation failed', { namespace, error: errorMessage })
+      let answer = `Fejl under generering af svar: ${errorMessage}`
       
       if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
-        answer = 'Error: Groq API authentication failed. Please check your GROQ_API_KEY.'
+        answer = 'Fejl: Groq API-godkendelse mislykkedes. Kontrollér din GROQ_API_KEY.'
       } else if (errorMessage.includes('rate limit')) {
-        answer = 'Error: Groq API rate limit exceeded. Please try again later.'
+        answer = 'Fejl: Groq API-rate limit er nået. Prøv igen senere.'
       }
       
       return new Response(
@@ -368,10 +367,10 @@ ${rawContent}`
         { headers: { 'Content-Type': 'application/json' } }
       )
     }
-  } catch {
-    console.error('Query processing failed')
+  } catch (error) {
+    console.error('Query processing failed', error)
     return new Response(
-      JSON.stringify({ error: 'Failed to process query' }), 
+      JSON.stringify({ error: 'Kunne ikke behandle forespørgslen' }), 
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }

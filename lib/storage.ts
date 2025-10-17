@@ -1,8 +1,10 @@
 import { Redis } from '@upstash/redis'
+import { normalizeQuickPrompts } from './quick-prompts'
 
 export interface IndexMetadata {
   url: string
   namespace: string
+  slug: string
   pagesCrawled: number
   createdAt: string
   metadata?: {
@@ -10,8 +12,21 @@ export interface IndexMetadata {
     description?: string
     favicon?: string
     ogImage?: string
+    quickPrompts?: string[]
   }
 }
+
+const ensureSlug = (index: Omit<IndexMetadata, 'slug'> & { slug?: string }): IndexMetadata => {
+  const fallbackSlug = index.slug ?? index.namespace;
+  return {
+    ...index,
+    slug: fallbackSlug,
+    metadata: {
+      ...(index.metadata || {}),
+      quickPrompts: normalizeQuickPrompts(index.metadata?.quickPrompts),
+    },
+  };
+};
 
 interface StorageAdapter {
   getIndexes(): Promise<IndexMetadata[]>
@@ -20,15 +35,79 @@ interface StorageAdapter {
   deleteIndex(namespace: string): Promise<void>
 }
 
+class FileStorageAdapter implements StorageAdapter {
+  private async getFilePath() {
+    const { join } = await import('path')
+    return process.env.LEJECHAT_STORAGE_PATH || join(process.cwd(), '.lejechat-indexes.json')
+  }
+
+  private async readFile(): Promise<IndexMetadata[]> {
+    try {
+      const fs = await import('fs/promises')
+      const filePath = await this.getFilePath()
+      const data = await fs.readFile(filePath, 'utf8')
+      const parsed = JSON.parse(data) as Array<Omit<IndexMetadata, 'slug'> & { slug?: string }>
+      return parsed.map(ensureSlug)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return []
+      }
+      console.warn('Kunne ikke læse indexfilen', error)
+      return []
+    }
+  }
+
+  private async writeFile(indexes: IndexMetadata[]): Promise<void> {
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    const filePath = await this.getFilePath()
+    const dir = path.dirname(filePath)
+    try {
+      await fs.mkdir(dir, { recursive: true })
+      await fs.writeFile(filePath, JSON.stringify(indexes, null, 2), 'utf8')
+    } catch (error) {
+      console.warn('Kunne ikke skrive indexfilen', error)
+    }
+  }
+
+  async getIndexes(): Promise<IndexMetadata[]> {
+    return this.readFile()
+  }
+
+  async getIndex(namespace: string): Promise<IndexMetadata | null> {
+    const indexes = await this.readFile()
+    const match = indexes.find((item) => item.namespace === namespace)
+    return match ? { ...match } : null
+  }
+
+  async saveIndex(index: IndexMetadata): Promise<void> {
+    const normalized = ensureSlug(index)
+    const indexes = await this.readFile()
+    const existingIndex = indexes.findIndex((item) => item.namespace === normalized.namespace)
+    if (existingIndex !== -1) {
+      indexes[existingIndex] = normalized
+    } else {
+      indexes.unshift(normalized)
+    }
+    await this.writeFile(indexes.slice(0, 50))
+  }
+
+  async deleteIndex(namespace: string): Promise<void> {
+    const indexes = await this.readFile()
+    const filtered = indexes.filter((item) => item.namespace !== namespace)
+    await this.writeFile(filtered)
+  }
+}
+
 class LocalStorageAdapter implements StorageAdapter {
-  private readonly STORAGE_KEY = 'firestarter_indexes'
+  private readonly STORAGE_KEY = 'lejechat_indexes'
 
   async getIndexes(): Promise<IndexMetadata[]> {
     if (typeof window === 'undefined') return []
     
     try {
       const stored = localStorage.getItem(this.STORAGE_KEY)
-      return stored ? JSON.parse(stored) : []
+      return stored ? (JSON.parse(stored) as Array<Omit<IndexMetadata, 'slug'> & { slug?: string }>).map(ensureSlug) : []
     } catch {
       console.error('Failed to get stored indexes')
       return []
@@ -41,17 +120,18 @@ class LocalStorageAdapter implements StorageAdapter {
   }
 
   async saveIndex(index: IndexMetadata): Promise<void> {
+    const normalized = ensureSlug(index)
     if (typeof window === 'undefined') {
       throw new Error('localStorage is not available on the server')
     }
     
     const indexes = await this.getIndexes()
-    const existingIndex = indexes.findIndex(i => i.namespace === index.namespace)
+    const existingIndex = indexes.findIndex(i => i.namespace === normalized.namespace)
     
     if (existingIndex !== -1) {
-      indexes[existingIndex] = index
+      indexes[existingIndex] = normalized
     } else {
-      indexes.unshift(index)
+      indexes.unshift(normalized)
     }
     
     // Keep only the last 50 indexes
@@ -82,8 +162,8 @@ class LocalStorageAdapter implements StorageAdapter {
 
 class RedisStorageAdapter implements StorageAdapter {
   private redis: Redis
-  private readonly INDEXES_KEY = 'firestarter:indexes'
-  private readonly INDEX_KEY_PREFIX = 'firestarter:index:'
+  private readonly INDEXES_KEY = 'lejechat:indexes'
+  private readonly INDEX_KEY_PREFIX = 'lejechat:index:'
 
   constructor() {
     if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
@@ -98,8 +178,8 @@ class RedisStorageAdapter implements StorageAdapter {
 
   async getIndexes(): Promise<IndexMetadata[]> {
     try {
-      const indexes = await this.redis.get<IndexMetadata[]>(this.INDEXES_KEY)
-      return indexes || []
+      const indexes = await this.redis.get<Array<Omit<IndexMetadata, 'slug'> & { slug?: string }>>(this.INDEXES_KEY)
+      return indexes ? indexes.map(ensureSlug) : []
     } catch {
       console.error('Failed to get indexes from Redis')
       return []
@@ -108,8 +188,8 @@ class RedisStorageAdapter implements StorageAdapter {
 
   async getIndex(namespace: string): Promise<IndexMetadata | null> {
     try {
-      const index = await this.redis.get<IndexMetadata>(`${this.INDEX_KEY_PREFIX}${namespace}`)
-      return index
+      const index = await this.redis.get<Omit<IndexMetadata, 'slug'> & { slug?: string }>(`${this.INDEX_KEY_PREFIX}${namespace}`)
+      return index ? ensureSlug(index) : null
     } catch {
       console.error('Failed to get index from Redis')
       return null
@@ -117,18 +197,19 @@ class RedisStorageAdapter implements StorageAdapter {
   }
 
   async saveIndex(index: IndexMetadata): Promise<void> {
+    const normalized = ensureSlug(index)
     try {
       // Save individual index
-      await this.redis.set(`${this.INDEX_KEY_PREFIX}${index.namespace}`, index)
+      await this.redis.set(`${this.INDEX_KEY_PREFIX}${normalized.namespace}`, normalized)
       
       // Update indexes list
       const indexes = await this.getIndexes()
-      const existingIndex = indexes.findIndex(i => i.namespace === index.namespace)
+      const existingIndex = indexes.findIndex(i => i.namespace === normalized.namespace)
       
       if (existingIndex !== -1) {
-        indexes[existingIndex] = index
+        indexes[existingIndex] = normalized
       } else {
-        indexes.unshift(index)
+        indexes.unshift(normalized)
       }
       
       // Keep only the last 50 indexes
@@ -156,17 +237,14 @@ class RedisStorageAdapter implements StorageAdapter {
 
 // Factory function to get the appropriate storage adapter
 function getStorageAdapter(): StorageAdapter {
-  // Use Redis if both environment variables are set
   if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
     return new RedisStorageAdapter()
   }
-  
-  // Check if we're on the server
+
   if (typeof window === 'undefined') {
-    throw new Error('No storage adapter available on the server. Please configure Redis by setting UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN environment variables.')
+    return new FileStorageAdapter()
   }
-  
-  // Otherwise, use localStorage (only on client)
+
   return new LocalStorageAdapter()
 }
 
@@ -177,8 +255,13 @@ function getStorage(): StorageAdapter | null {
   if (!storage) {
     try {
       storage = getStorageAdapter()
-    } catch {
-      // This is expected on the server without Redis configured
+      let adapterName = 'Ukendt'
+      if (storage instanceof RedisStorageAdapter) adapterName = 'Redis'
+      else if (storage instanceof LocalStorageAdapter) adapterName = 'LocalStorage'
+      else if (storage instanceof FileStorageAdapter) adapterName = 'File'
+      console.info('[Lejechat] Storage adapter initialiseret:', adapterName)
+    } catch (error) {
+      console.warn('[Lejechat] Ingen storage-adapter tilgængelig', error)
       return null
     }
   }

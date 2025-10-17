@@ -1,5 +1,4 @@
 import { groq } from '@ai-sdk/groq'
-import { openai } from '@ai-sdk/openai'
 import { anthropic } from '@ai-sdk/anthropic'
 import { Ratelimit } from '@upstash/ratelimit'
 import { Redis } from '@upstash/redis'
@@ -11,7 +10,7 @@ const AI_PROVIDERS = {
     enabled: !!process.env.GROQ_API_KEY,
   },
   openai: {
-    model: openai('gpt-4o'),
+    model: null,
     enabled: !!process.env.OPENAI_API_KEY,
   },
   anthropic: {
@@ -27,10 +26,9 @@ function getAIModel() {
     return null
   }
   // Priority: OpenAI (GPT-4o) > Anthropic (Claude 3.5 Sonnet) > Groq
-  if (AI_PROVIDERS.openai.enabled) return AI_PROVIDERS.openai.model
   if (AI_PROVIDERS.anthropic.enabled) return AI_PROVIDERS.anthropic.model
   if (AI_PROVIDERS.groq.enabled) return AI_PROVIDERS.groq.model
-  throw new Error('No AI provider configured. Please set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GROQ_API_KEY')
+  throw new Error('Ingen AI-udbyder er konfigureret. Angiv OPENAI_API_KEY, ANTHROPIC_API_KEY eller GROQ_API_KEY')
 }
 
 // Rate limiter factory
@@ -51,22 +49,26 @@ function createRateLimiter(identifier: string, requests = 50, window = '1 d') {
     redis,
     limiter: Ratelimit.fixedWindow(requests, window),
     analytics: true,
-    prefix: `firestarter:ratelimit:${identifier}`,
+    prefix: `lejechat:ratelimit:${identifier}`,
   })
 }
 
 const config = {
   app: {
-    name: 'Firestarter',
+    name: 'Lejechat',
     url: process.env.NEXT_PUBLIC_URL || 'http://localhost:3000',
-    logoPath: '/firecrawl-logo-with-fire.png',
+    logoPath: '/lejechat-logo.svg',
   },
 
   ai: {
-    model: getAIModel(),
-    temperature: 0.7,
-    maxTokens: 800,
-    systemPrompt: `You are a friendly assistant. If a user greets you or engages in small talk, respond politely without referencing the website. For questions about the website, answer using ONLY the provided context below. Do not use any other knowledge. If the context isn't sufficient to answer, say so explicitly.`,
+    model: null as unknown,
+    reasoningEffort:
+      (process.env.GPT5_REASONING_EFFORT as 'minimal' | 'low' | 'medium' | 'high') || 'medium',
+    verbosity: (process.env.GPT5_VERBOSITY as 'low' | 'medium' | 'high') || 'medium',
+    maxOutputTokens: process.env.GPT5_MAX_OUTPUT_TOKENS
+      ? Number(process.env.GPT5_MAX_OUTPUT_TOKENS)
+      : 800,
+    systemPrompt: `Du er en hjælpsom udlejningsassistent. Når en bruger spørger til boliger, skal du svare på dansk og kun bruge konteksten nedenfor. Hvis du ikke kan finde svar i materialet, skal du sige det tydeligt. Besvar også spørgsmål om depositum, inflytningsdatoer og kontaktmuligheder, hvis oplysningerne findes i teksterne.`,
     providers: AI_PROVIDERS,
   },
 
@@ -89,10 +91,10 @@ const config = {
 
   storage: {
     maxIndexes: 50,
-    localStorageKey: 'firestarter_indexes',
+    localStorageKey: 'lejechat_indexes',
     redisPrefix: {
-      indexes: 'firestarter:indexes',
-      index: 'firestarter:index:',
+      indexes: 'lejechat:indexes',
+      index: 'lejechat:index:',
     },
   },
 
